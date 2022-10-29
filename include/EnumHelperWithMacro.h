@@ -489,6 +489,3 @@ namespace enumflags
 
 #define ENUM_HELPER_PAIR_CREATOR(Enum, N, x) \
     EnumHelper::toEnumPair<Enum, N>((const char *)#x, EnumHelper::detail::findKeyLength(#x), ((EnumHelper::detail::ignoreAssignment<Enum>)Enum::x).value),
-
-#define ENUM_HELPER_KEY_LENGHT(x) \
-    EnumHelper::detail::findKeyLength(#x),

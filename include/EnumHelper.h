@@ -12,47 +12,65 @@
 #include <string_view>
 template< bool B, class T = void >
 using enable_if_t = std::enable_if_t<B,T>;
+#define USE_STRING_VIEW
+#define USING_STD_SEQUENCE
+#define USE_STRING_VIEW
+#define USING_STD_ARRAY
 
-constexpr bool stringsEqual(char const * a, char const * b) {
-    return std::string_view(a) == b;
-}
 #elif __cplusplus>=201402L // C++ 14 code goes here
 template< bool B, class T = void >
 using enable_if_t = std::enable_if_t<B,T>;
-
-constexpr bool stringsEqual(char const * a, char const * b) {
-    return *a == *b && (*a == '\0' || *b == '\0' || stringsEqual(a + 1, b + 1));
-}
 
 #elif __cplusplus>=201103L // C++ 11 code goes here
 template< bool B, class T = void >
 using enable_if_t = typename std::enable_if<B,T>::type;
 
-constexpr bool stringsEqual(char const * a, char const * b) {
-    return *a == *b && (*a == '\0' || stringsEqual(a + 1, b + 1));
-}
-
 #elif __cplusplus>199711L
 template< bool B, class T = void >
 using enable_if_t = typename std::enable_if<B,T>::type;
 
-constexpr bool stringsEqual(char const * a, char const * b) {
-    return *a == *b && (*a == '\0' || stringsEqual(a + 1, b + 1));
-}
 #else
     #error "Requires C++11 or higher"
+#endif
+
+#ifdef USE_STRING_VIEW
+#include <string_view>
+#endif
+
+#ifdef USING_STD_ARRAY
+#include <array>
 #endif
 
 /***************
  * MakeSeq
  **************/
 #include <cstddef>
+namespace EnumHelper
+{
+
 namespace detail
 {
-    template <std::size_t... Size>
+#ifdef USE_STRING_VIEW
+    constexpr bool stringsEqual(char const *a, char const *b)
+    {
+        return std::string_view(a) == std::string_view(b);
+    }
+#else
+    inline constexpr bool stringsEqual(char const *a, char const *b)
+    {
+        return *a == *b && (*b == '\0' || *a == '\0' || stringsEqual(a + 1, b + 1));
+    }
+#endif
+
+#ifdef USING_STD_SEQUENCE
+    template <size_t... Size>
+    using Seq = std::index_sequence<Size...>;
+#else
+    template <size_t... Size>
     struct Seq
     {
     };
+#endif
 
     template <std::size_t Prepend, typename T>
     struct appender
@@ -82,30 +100,48 @@ namespace detail
 /***************
  * ConstExprArray
  **************/
-template <typename T, std::size_t dim>
-struct ConstExprArray
-{
-    const T arr[dim];
-    constexpr ConstExprArray() = default;
-
-    constexpr const T& operator[](std::size_t index) const
+#ifdef USING_STD_ARRAY
+    template <typename T, size_t dim>
+    using ConstExprArray = std::array<T, dim>;
+#else
+    template <typename T, std::size_t dim>
+    struct ConstExprArrayStruct
     {
-        return arr[index];
-    }
+        const T arr[dim];
+        constexpr ConstExprArrayStruct() = default;
 
-    T const *begin() const
-    {
-        return arr;
-    }
-    T const *end() const
-    {
-        return arr + dim;
-    }
+        constexpr const T& operator[](std::size_t index) const
+        {
+            return arr[index];
+        }
 
-    constexpr operator const T*() const {
-        return &arr[0];
-    }
-};
+        T const *begin() const
+        {
+            return arr;
+        }
+        T const *end() const
+        {
+            return arr + dim;
+        }
+
+        constexpr operator const T*() const {
+            return &arr[0];
+        }
+    };
+
+    template <typename T, size_t dim>
+    struct ConstExprArrayStruct_tmp
+    {
+        const T arr[dim];
+        constexpr const T &operator[](size_t index) const
+        {
+            return arr[index];
+        }
+    };
+    template <typename T, size_t dim>
+    using ConstExprArray = ConstExprArrayStruct<T, dim>;
+#endif
+
  
 template <typename T, std::size_t LL, std::size_t RL, std::size_t... LLs, std::size_t... RLs>
 constexpr ConstExprArray<T, LL + RL> join(ConstExprArray<T, LL> lhs, ConstExprArray<T, RL> rhs, detail::Seq<LLs...>, detail::Seq<RLs...>)
@@ -212,7 +248,7 @@ class MagicValue
 
     constexpr const char* toString() const
     {
-        return key;
+        return &key[0];
     }
 
     constexpr const EnumType getValue() const
@@ -277,15 +313,15 @@ class MagicEnum
     template <typename EnumClassType>
     constexpr size_t indexOf(const EnumClassType value, size_t index = 0) const
     {
-        return (index >= sizeof(lookupTable.arr)/sizeof(lookupTable.arr[0])) ? -1 :
+        return (index >= sizeof(lookupTable)/sizeof(lookupTable[0])) ? -1 :
             (static_cast<size_t>(value) == lookupTable[index].value) ? index :
                 indexOf<EnumClassType>(value, index+1);
     }
 
     constexpr size_t indexOf(const char* name, size_t index = 0) const
     {
-        return (index >= sizeof(lookupTable.arr)/sizeof(lookupTable.arr[0])) ? -1 :
-            (stringsEqual(name, lookupTable[index].key)) ? index :
+        return (index >= sizeof(lookupTable)/sizeof(lookupTable[0])) ? -1 :
+            (detail::stringsEqual(name, lookupTable[index].toString())) ? index :
                 indexOf(name, index+1);
     }
 
@@ -343,6 +379,7 @@ class MagicEnum
     /* Remove the last Invalid Enum */
     const_iterator  end() const { return const_iterator(lookupTable.end() - 1); }
 };
+} //EnumHelper
 
 #define EnumHelper2(ClassName, ...) \
     enum class ClassName : size_t  \
@@ -350,12 +387,12 @@ class MagicEnum
         __VA_ARGS__                \
     };                             \
     constexpr static auto *ClassName##Str = static_cast<const char *>(#__VA_ARGS__); \
-    constexpr static auto ClassName##LookupTable = createLookupTable<MagicValue<ClassName,findMaxLength(ClassName##Str)>, findMaxLength(ClassName##Str), findLastIndex(ClassName##Str)+1>(ClassName##Str); \
-    constexpr static auto ClassName##MagicEnum = MagicEnum<decltype(ClassName##LookupTable), ClassName, MagicValue<ClassName,findMaxLength(ClassName##Str)>>(ClassName##LookupTable); \
-    struct ClassName##MagicValue : public MagicValue<ClassName,findMaxLength(ClassName##Str)>{        \
-        constexpr ClassName##MagicValue(const Color &value) : MagicValue<ClassName,findMaxLength(ClassName##Str)>(ClassName##MagicEnum(value)) { } \
-        constexpr ClassName##MagicValue(const char* value) : MagicValue<ClassName,findMaxLength(ClassName##Str)>(ClassName##MagicEnum(value)) { } \
-        constexpr ClassName##MagicValue(const size_t value) : MagicValue<ClassName,findMaxLength(ClassName##Str)>(ClassName##MagicEnum(value)) { } \
+    constexpr static auto ClassName##LookupTable = EnumHelper::createLookupTable<EnumHelper::MagicValue<ClassName, EnumHelper::findMaxLength(ClassName##Str)>, EnumHelper::findMaxLength(ClassName##Str), EnumHelper::findLastIndex(ClassName##Str)+1>(ClassName##Str); \
+    constexpr static auto ClassName##MagicEnum = EnumHelper::MagicEnum<decltype(ClassName##LookupTable), ClassName, EnumHelper::MagicValue<ClassName, EnumHelper::findMaxLength(ClassName##Str)>>(ClassName##LookupTable); \
+    struct ClassName##MagicValue : public EnumHelper::MagicValue<ClassName, EnumHelper::findMaxLength(ClassName##Str)>{        \
+        constexpr ClassName##MagicValue(const Color &value) : EnumHelper::MagicValue<ClassName, EnumHelper::findMaxLength(ClassName##Str)>(ClassName##MagicEnum(value)) { } \
+        constexpr ClassName##MagicValue(const char* value) : EnumHelper::MagicValue<ClassName, EnumHelper::findMaxLength(ClassName##Str)>(ClassName##MagicEnum(value)) { } \
+        constexpr ClassName##MagicValue(const size_t value) : EnumHelper::MagicValue<ClassName, EnumHelper::findMaxLength(ClassName##Str)>(ClassName##MagicEnum(value)) { } \
     };
 #define EnumHelper(...) EnumHelper2(__VA_ARGS__, Invalid)
 
