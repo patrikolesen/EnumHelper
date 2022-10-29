@@ -9,8 +9,8 @@ set(CMAKE_CXX_FLAGS_RELEASE "-O3")
 
 set(CMAKE_BUILD_TYPE "Debug")
 
-add_executable(EnumIterator examples/EnumIterator.cpp)
-target_include_directories(EnumIterator PRIVATE include)
-set_property(TARGET EnumIterator PROPERTY CXX_STANDARD 11)
+add_executable(enum_iterator examples/EnumIterator.cpp)
+target_include_directories(enum_iterator PRIVATE include)
+set_property(TARGET enum_iterator PROPERTY CXX_STANDARD 11)
 
 
