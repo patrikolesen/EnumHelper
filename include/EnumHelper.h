@@ -232,6 +232,16 @@ public:
     {
         return static_cast<size_t>(value);
     }
+
+    constexpr const EnumType getValue() const
+    {
+        return static_cast<EnumType>(value);
+    }
+
+    constexpr operator size_t() const { return getIntValue();}
+    constexpr operator int() const { return getIntValue();}
+    constexpr operator const char*()  const { return toString();}
+    constexpr operator EnumType()  const { return getValue();}
 };
 
 template <typename EnumType, size_t N, size_t... Idx>
@@ -489,3 +499,10 @@ namespace enumflags
 
 #define ENUM_HELPER_PAIR_CREATOR(Enum, N, x) \
     EnumHelper::toEnumPair<Enum, N>((const char *)#x, EnumHelper::detail::findKeyLength(#x), ((EnumHelper::detail::ignoreAssignment<Enum>)Enum::x).value),
+
+template <typename EnumClass, size_t N>
+std::ostream& operator<<(std::ostream& os, const EnumHelper::EnumPair<EnumClass,N>& val)
+{
+    os << val.toString() << "(" << val.getIntValue() << ")";
+    return os;
+}
