@@ -21,7 +21,7 @@ add_executable(enum_iterator_20 examples/EnumIterator.cpp)
 target_include_directories(enum_iterator_20 PRIVATE include)
 set_property(TARGET enum_iterator_20 PROPERTY CXX_STANDARD 20)
 
-add_executable(enum_iterator_macro examples/EnumIteratorWithMacro.cpp)
+add_executable(enum_iterator_macro examples/EnumIteratorWithoutMacroMagic.cpp)
 target_include_directories(enum_iterator_macro PRIVATE include)
 set_property(TARGET enum_iterator_macro PROPERTY CXX_STANDARD 11)
 

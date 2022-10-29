@@ -8,7 +8,7 @@
 
 int main(int, char *[])
 {
-    EnumHelper(Color, Red = 23, Blue, Green, Purple, Red1 = 100, Blue1, Green1, Purple1, Red2, Blue2, Green2, Purple2);
+    EnumHelper(Color, Red = 23, Blue, Green, Purple, Red1 = 100, Blue1, Green1, Purple1, Red2, Blue2, Green2, Purple2 = 100 + 100);
     for(auto const& color : ColorMagicEnum)
     {
         printf("%s = %ld\n", color.toString(), color.getIntValue());

@@ -5,33 +5,16 @@
 * Copyright (c) 2018 - 2022 Patrik Olesen <patrik@hemma.org>
 */
 
-#include <stdio.h>
- 
+#include <cstddef>
 #include <type_traits>
-#if __cplusplus>=201703L // C++ 17 code goes here
-#include <string_view>
-template< bool B, class T = void >
-using enable_if_t = std::enable_if_t<B,T>;
-#define USE_STRING_VIEW
+#include <iterator>
+#include <utility>
+#include <algorithm>
+
+#if __cplusplus >= 201703L // C++ 17 code goes here
 #define USING_STD_SEQUENCE
 #define USE_STRING_VIEW
 #define USING_STD_ARRAY
-
-#elif __cplusplus>=201402L // C++ 14 code goes here
-template< bool B, class T = void >
-using enable_if_t = std::enable_if_t<B,T>;
-
-#elif __cplusplus>=201103L // C++ 11 code goes here
-template< bool B, class T = void >
-using enable_if_t = typename std::enable_if<B,T>::type;
-
-#elif __cplusplus>199711L
-template< bool B, class T = void >
-using enable_if_t = typename std::enable_if<B,T>::type;
-
-#else
-    #error "Requires C++11 or higher"
-#endif
 
 #ifdef USE_STRING_VIEW
 #include <string_view>
@@ -41,13 +24,10 @@ using enable_if_t = typename std::enable_if<B,T>::type;
 #include <array>
 #endif
 
-/***************
- * MakeSeq
- **************/
-#include <cstddef>
+#endif
+
 namespace EnumHelper
 {
-
 namespace detail
 {
 #ifdef USE_STRING_VIEW
@@ -62,6 +42,24 @@ namespace detail
     }
 #endif
 
+template<typename T>
+constexpr T max(T val)
+{
+    return val;
+}
+
+template<typename T, class...Args>
+constexpr T max(T val, Args...args)
+{
+    return (val > max(args...)) ? val : max(args...);
+}
+/***************
+ * KeyNameRetriever
+ **************/
+
+/***************
+ * MakeSeq
+ **************/
 #ifdef USING_STD_SEQUENCE
     template <size_t... Size>
     using Seq = std::index_sequence<Size...>;
@@ -71,31 +69,34 @@ namespace detail
     {
     };
 #endif
-
-    template <std::size_t Prepend, typename T>
+    template <size_t Prepend, typename T>
     struct appender
     {
     };
 
-    template <std::size_t Prepend, std::size_t... Sizes>
-    struct appender<Prepend, Seq<Sizes...> >
+    template <size_t Prepend, size_t... Sizes>
+    struct appender<Prepend, Seq<Sizes...>>
     {
         using type = Seq<Prepend, Sizes...>;
     };
 
-    template <std::size_t from, std::size_t to>
+    template <size_t from, size_t to>
     struct MakeSeqImpl
     {
         using type = typename appender<from, typename MakeSeqImpl<from + 1, to>::type>::type;
     };
 
-    template <std::size_t to>
+    template <size_t to>
     struct MakeSeqImpl<to, to>
     {
         using type = Seq<>;
     };
 
-} // namespace detail
+    template <size_t to>
+    struct MakeSeqToImpl
+    {
+        using type = typename MakeSeqImpl<0, to>::type;
+    };
 
 /***************
  * ConstExprArray
@@ -104,33 +105,8 @@ namespace detail
     template <typename T, size_t dim>
     using ConstExprArray = std::array<T, dim>;
 #else
-    template <typename T, std::size_t dim>
-    struct ConstExprArrayStruct
-    {
-        const T arr[dim];
-        constexpr ConstExprArrayStruct() = default;
-
-        constexpr const T& operator[](std::size_t index) const
-        {
-            return arr[index];
-        }
-
-        T const *begin() const
-        {
-            return arr;
-        }
-        T const *end() const
-        {
-            return arr + dim;
-        }
-
-        constexpr operator const T*() const {
-            return &arr[0];
-        }
-    };
-
     template <typename T, size_t dim>
-    struct ConstExprArrayStruct_tmp
+    struct ConstExprArrayStruct
     {
         const T arr[dim];
         constexpr const T &operator[](size_t index) const
@@ -142,348 +118,374 @@ namespace detail
     using ConstExprArray = ConstExprArrayStruct<T, dim>;
 #endif
 
- 
-template <typename T, std::size_t LL, std::size_t RL, std::size_t... LLs, std::size_t... RLs>
-constexpr ConstExprArray<T, LL + RL> join(ConstExprArray<T, LL> lhs, ConstExprArray<T, RL> rhs, detail::Seq<LLs...>, detail::Seq<RLs...>)
-{
-    return {rhs[LLs]..., lhs[RLs]...};
-}
-
-template <typename T, std::size_t LL, std::size_t RL>
-constexpr ConstExprArray<T, LL + RL> join(ConstExprArray<T, LL> lhs, ConstExprArray<T, RL> rhs)
-{
-    return join(rhs, lhs, typename detail::MakeSeqImpl<0, LL>::type(), typename detail::MakeSeqImpl<0, RL>::type());
-}
-
-
-/*********************************
-* CSV
-**********************************/
-constexpr std::size_t findComma(const char *str, std::size_t startOffset = 0)
-{
-    return (str[startOffset] == ',') ? startOffset : (str[startOffset] == '\0') ? startOffset : findComma(str + 1, startOffset) + 1;
-}
-
-constexpr size_t findEnd(const char *str, size_t startOffset = 0)
-{
-    return (str[startOffset] == ',' || str[startOffset] == '\0') ? startOffset : (str[startOffset] == ' ' || str[startOffset] == '=') ? startOffset : findEnd(str + 1, startOffset) + 1;
-}
-
-constexpr size_t trimStart(const char *str, size_t pos)
-{
-    return (str[pos] != ' ') ? pos : trimStart(str, pos + 1);
-}
-constexpr size_t trimEnd(const char *str, size_t pos)
-{
-    return (str[pos] != ' ') ? pos : trimEnd(str, pos - 1);
-}
-
-constexpr std::size_t findIndex(int index, const char *str, std::size_t pos = 0)
-{
-    return (index == 0) ? pos : findIndex(index - 1, str + findComma(str) + 1, findComma(str) + pos + 1);
-}
-
-constexpr int nrOfCharsOld(const char *str)
-{
-    return (*str == '\0') ? 0 : nrOfCharsOld(str + 1) + 1;
-}
-
-constexpr size_t findLastIndex(const char *str, size_t startIndex = 0)
-{
-    return (str[findComma(str, findIndex(startIndex, str))] == '\0') ? startIndex : findLastIndex(str, startIndex+1);
-}
-
-constexpr int nrOfChars(const char *str)
-{
-    return findComma(str,findIndex(findLastIndex(str),str));
-}
-
-constexpr size_t max(size_t a, size_t b)
-{
-    return (a>b)?a:b;
-}
-
-constexpr size_t findKeyLength(size_t index, const char* str)
-{
-    return findEnd(str, findIndex(index ,str)+1)-trimStart(str,findIndex(index,str));    
-}
-
-constexpr size_t findMaxLength(const char *str, size_t index)
-{
-    return (index == 0) ? findEnd(str) : max(findKeyLength(index, str), findMaxLength(str, index-1))+1;
-}
-constexpr size_t findMaxLength(const char *str)
-{
-    return findMaxLength(str, findLastIndex(str));
-}
-
-constexpr size_t getEnumValueForCurrentIndex(const char* str, size_t value = 0, bool hasValue = false)
-{
-    return (*str == '\0' || *str == ',') ? (
-           value
-        ) :
-        (*str == '=') ?  getEnumValueForCurrentIndex(str+1, 0, true) :
-            (hasValue && *str >= '0' && *str <= '9') ? getEnumValueForCurrentIndex(str+1, value*10 + *str - '0', hasValue) :
-                getEnumValueForCurrentIndex(str+1, value, hasValue);
-}
-
-constexpr size_t getEnumValueForIndex(const char* str, size_t index)
-{
-    return (index == 0) ? getEnumValueForCurrentIndex(&str[findIndex(index,str)]) : 
-        (getEnumValueForCurrentIndex(&str[findIndex(index,str)]) != 0) ? getEnumValueForCurrentIndex(&str[findIndex(index,str)]) : getEnumValueForIndex(str, index-1) + 1;
-}
-
-/*********************************
-* Build lookup
-**********************************/
-template <typename EnumType, std::size_t N>
-class MagicValue
-{
-    public:
-    const ConstExprArray<char,N> key;
-    size_t value;
-
-    constexpr MagicValue() = delete;
-    constexpr MagicValue(const ConstExprArray<char,N> key, size_t value) : key(key), value(value) {};
-
-    constexpr const char* toString() const
+    template <typename T, size_t LL, size_t RL, size_t... LLs, size_t... RLs>
+    constexpr ConstExprArray<T, LL + RL> join(ConstExprArray<T, LL> lhs, ConstExprArray<T, RL> rhs, detail::Seq<LLs...>, detail::Seq<RLs...>)
     {
-        return &key[0];
+        return {rhs[LLs]..., lhs[RLs]...};
     }
 
-    constexpr const EnumType getValue() const
+    template <typename T, size_t LL, size_t RL>
+    constexpr ConstExprArray<T, LL + RL> join(ConstExprArray<T, LL> lhs, ConstExprArray<T, RL> rhs)
     {
-        return static_cast<EnumType>(value);
+        return join(rhs, lhs, typename detail::MakeSeqImpl<0, LL>::type(), typename detail::MakeSeqImpl<0, RL>::type());
     }
 
+    template <size_t dim>
+    constexpr ConstExprArray<const char, dim> createString(const char *csv, const size_t maxLength, const size_t index = 0)
+    {
+        return join(createString<dim / 2>(csv, maxLength, index), createString<dim - dim / 2>(csv, maxLength, index + dim / 2));
+    }
+
+    template <>
+    constexpr ConstExprArray<const char, 1> createString<1>(const char *csv, const size_t maxLength, const size_t index)
+    {
+        return {(index >= maxLength) ? '\0' : csv[index]};
+    }
+
+    /***************
+    * CSV, Used for finding max key length
+    **************/
+    constexpr std::size_t findComma(const char *str, std::size_t startOffset = 0)
+    {
+        return (str[startOffset] == ',') ? startOffset : (str[startOffset] == '\0') ? startOffset
+                                                                                    : findComma(str + 1, startOffset) + 1;
+    }
+
+    constexpr size_t findEnd(const char *str, size_t startOffset = 0)
+    {
+        return (str[startOffset] == ',' || str[startOffset] == '\0') ? startOffset : (str[startOffset] == ' ' || str[startOffset] == '=') ? startOffset
+                                                                                                                                          : findEnd(str + 1, startOffset) + 1;
+    }
+
+    constexpr size_t trimStart(const char *str, size_t pos)
+    {
+        return (str[pos] != ' ') ? pos : trimStart(str, pos + 1);
+    }
+
+    constexpr std::size_t findIndex(int index, const char *str, std::size_t pos = 0)
+    {
+        return (index == 0) ? pos : findIndex(index - 1, str + findComma(str) + 1, findComma(str) + pos + 1);
+    }
+
+    constexpr size_t findLastIndex(const char *str, size_t startIndex = 0)
+    {
+        return (str[findComma(str, findIndex(startIndex, str))] == '\0') ? startIndex : findLastIndex(str, startIndex + 1);
+    }
+
+    constexpr size_t findKeyLength(const char *str)
+    {
+        return findEnd(str, 0) - trimStart(str, 0);
+    }
+
+    constexpr size_t findKeyLength(size_t index, const char *str)
+    {
+        return findEnd(str, findIndex(index, str) + 1) - trimStart(str, findIndex(index, str));
+    }
+    constexpr size_t max(size_t a, size_t b)
+    {
+        return (a > b) ? a : b;
+    }
+
+    constexpr size_t findMaxLength(const char *str, size_t index)
+    {
+        return (index == 0) ? findEnd(str) : max(findKeyLength(index, str), findMaxLength(str, index - 1));
+    }
+
+    constexpr size_t findMaxLength(const char *str)
+    {
+        return findMaxLength(str, findLastIndex(str));
+    }
+
+    /***************
+    * ValueRetreiver
+    **************/
+    template <typename Enum>
+    struct ignoreAssignment final
+    {
+        Enum value;
+
+        constexpr explicit ignoreAssignment(Enum value) noexcept
+            : value(value) {}
+
+        template <typename Other>
+        constexpr const ignoreAssignment &operator=(Other) const noexcept
+        {
+            return *this;
+        }
+    };
+}
+
+/***************
+ * EnumBuilder
+ **************/
+template <typename EnumType, size_t N>
+class EnumPair
+{
+public:
+    const char name[N];
+    EnumType value;
+    constexpr const char *toString() const
+    {
+        return name;
+    }
     constexpr size_t getIntValue() const
     {
-        return value;
+        return static_cast<size_t>(value);
     }
-
-    constexpr bool hasValue() const
-    {
-        return value != static_cast<size_t>(EnumType::Invalid);
-    }
-
-    constexpr ConstExprArray<char,N> getConstArray()  const { return key;}
-
-    constexpr operator size_t() const { return getIntValue();}
-    constexpr operator char*()  const { return toString();}
-    constexpr operator ConstExprArray<char,N>()  const { return key;}
-    constexpr operator EnumType()  const { return getValue();}
 };
 
-
-template<std::size_t dim>
-constexpr ConstExprArray<char, dim> createString(const char* csv, const size_t maxLength, const size_t index = 0)
+template <typename EnumType, size_t N, size_t... Idx>
+constexpr EnumPair<EnumType, N> toEnumPair(const detail::ConstExprArray<const char, N> &arr, const EnumType &value, detail::Seq<Idx...>)
 {
-    return join(createString<dim/2>(csv, maxLength, index), createString<dim-dim/2>(csv, maxLength, index+dim/2));
+    return {arr[Idx]..., value};
 }
 
-template<>
-constexpr ConstExprArray<char, 1> createString<1>(const char* csv, const size_t maxLength, const size_t index)
+template <typename EnumType, size_t N>
+constexpr EnumPair<EnumType, N> toEnumPair(const detail::ConstExprArray<const char, N> &arr, const EnumType &value)
 {
-    return {(index >= maxLength)? '\0':csv[index]};
+    return toEnumPair(arr, value, typename detail::MakeSeqToImpl<N>::type());
 }
 
-template<typename ElementType, std::size_t N, std::size_t dim, class = enable_if_t<dim == 1>>
-constexpr ConstExprArray<ElementType, 1> createLookupTable(const char* csv, const size_t index)
+template <typename EnumType, size_t N>
+constexpr EnumPair<EnumType, N> toEnumPair(const char *arr, size_t maxLen, const EnumType &value)
 {
-    return {ElementType(createString<N>(&csv[trimStart(csv,findIndex(index, csv))], findKeyLength(index, csv)), getEnumValueForIndex(csv, index))};
+    return toEnumPair(detail::createString<N>(arr, maxLen), value);
 }
 
-template<typename ElementType, std::size_t N, std::size_t dim,class = enable_if_t<! (dim == 1)> >
-constexpr ConstExprArray<ElementType, dim> createLookupTable(const char* csv, const size_t index=0)
-{
-    return join(createLookupTable<ElementType, N, dim/2>(csv, index), createLookupTable<ElementType, N, dim-dim/2>(csv, index+dim/2));
-}
-
-
-/*********************************
-* Magic Enum
-**********************************/
-template <typename LookupTable, typename T, typename LookupTableElementType>
+template <typename LookupTable, typename EnumPairType>
 class MagicEnum
 {
-    public:
     const LookupTable &lookupTable;
-    constexpr MagicEnum(const LookupTable& lookupTable) :  lookupTable(lookupTable) {}
 
-    template <typename EnumClassType>
-    constexpr size_t indexOf(const EnumClassType value, size_t index = 0) const
+public:
+    constexpr MagicEnum(const LookupTable &lookupTable) : lookupTable(lookupTable) {}
+
+    template <typename EnumType>
+    constexpr size_t indexOf(const EnumType &value, size_t index = 0) const
     {
-        return (index >= sizeof(lookupTable)/sizeof(lookupTable[0])) ? -1 :
-            (static_cast<size_t>(value) == lookupTable[index].value) ? index :
-                indexOf<EnumClassType>(value, index+1);
+        return (index >= sizeof(lookupTable) / sizeof(lookupTable[0])) ? (size_t)-1 : (value == lookupTable[index].value) ? index
+                                                                                                                          : indexOf<EnumType>(value, index + 1);
     }
 
-    constexpr size_t indexOf(const char* name, size_t index = 0) const
+    constexpr size_t indexOf(const char *name, size_t index = 0) const
     {
-        return (index >= sizeof(lookupTable)/sizeof(lookupTable[0])) ? -1 :
-            (detail::stringsEqual(name, lookupTable[index].toString())) ? index :
-                indexOf(name, index+1);
+        return (index >= sizeof(lookupTable) / sizeof(lookupTable[0])) ? (size_t)(-1) : (detail::stringsEqual(name, lookupTable[index].name)) ? index
+                                                                                                                                              : indexOf(name, index + 1);
     }
 
-    template <typename EnumClassType>
-    constexpr const LookupTableElementType& operator()(const EnumClassType value) const
+    template <typename EnumType>
+    constexpr const EnumPairType &operator()(const EnumType value) const
     {
-        return (indexOf(value) == (size_t)-1) ? lookupTable[indexOf("Invalid")] : lookupTable[indexOf(value)];
+        return (indexOf(value) == (size_t)(-1)) ? lookupTable[indexOf(EnumType::Invalid)] : lookupTable[indexOf(value)];
     }
 
-    constexpr const LookupTableElementType& operator()(const size_t value) const
+    constexpr const EnumPairType &operator()(const size_t value) const
     {
-        return (indexOf(value) == (size_t)-1) ? lookupTable[indexOf("Invalid")] : lookupTable[indexOf(value)];
+        return (indexOf(static_cast<decltype(EnumPairType::value)>(value)) == (size_t)(-1)) ? lookupTable[indexOf("Invalid")] : lookupTable[indexOf(static_cast<decltype(EnumPairType::value)>(value))];
     }
 
-    constexpr const LookupTableElementType& operator()(const char* name) const
+    constexpr const EnumPairType &operator()(const char *name) const
     {
-        return (indexOf(name) == (size_t)-1) ? lookupTable[indexOf("Invalid")] : lookupTable[indexOf(name)];
+        return (indexOf(name) == (size_t)(-1)) ? lookupTable[indexOf("Invalid")] : lookupTable[indexOf(name)];
     }
 
-    class const_iterator 
+    constexpr const EnumPairType &at(const size_t index) const
     {
-        public:
-        friend class MagicEnum;
-        const LookupTableElementType* m_element{};
-        size_t m_index = 0;
-        T m_value{};
+        return lookupTable[index];
+    }
 
-        const_iterator (const LookupTableElementType* element) : m_element(element) {}
-
-        const LookupTableElementType& operator * ()  {
-            return m_element[m_index];
-        }
-
-        const_iterator& operator++ ()
-        {   
-            m_index++;
-            return *this;
-        }
-        
-        const_iterator& operator-- ()
-        {   
-            m_index--;
-            return *this;
-        }
-
-        bool operator != (const const_iterator& rhs) const
-        {
-            return &m_element[m_index] != &rhs.m_element[rhs.m_index];
-        }
-
-        const_iterator () : m_element(0) {}
-    };
-    
-    const_iterator  begin() const { return const_iterator(lookupTable.begin()); }
-    /* Remove the last Invalid Enum */
-    const_iterator  end() const { return const_iterator(lookupTable.end() - 1); }
+    constexpr const EnumPairType *begin() const { return std::begin(lookupTable); }
+    /* Remove the last elemnt */
+    constexpr const EnumPairType *end() const { return std::end(lookupTable) - 1; }
 };
-} //EnumHelper
 
-#define EnumHelper2(ClassName, ...) \
-    enum class ClassName : size_t  \
-    {                              \
-        __VA_ARGS__                \
-    };                             \
-    constexpr static auto *ClassName##Str = static_cast<const char *>(#__VA_ARGS__); \
-    constexpr static auto ClassName##LookupTable = EnumHelper::createLookupTable<EnumHelper::MagicValue<ClassName, EnumHelper::findMaxLength(ClassName##Str)>, EnumHelper::findMaxLength(ClassName##Str), EnumHelper::findLastIndex(ClassName##Str)+1>(ClassName##Str); \
-    constexpr static auto ClassName##MagicEnum = EnumHelper::MagicEnum<decltype(ClassName##LookupTable), ClassName, EnumHelper::MagicValue<ClassName, EnumHelper::findMaxLength(ClassName##Str)>>(ClassName##LookupTable); \
-    struct ClassName##MagicValue : public EnumHelper::MagicValue<ClassName, EnumHelper::findMaxLength(ClassName##Str)>{        \
-        constexpr ClassName##MagicValue(const Color &value) : EnumHelper::MagicValue<ClassName, EnumHelper::findMaxLength(ClassName##Str)>(ClassName##MagicEnum(value)) { } \
-        constexpr ClassName##MagicValue(const char* value) : EnumHelper::MagicValue<ClassName, EnumHelper::findMaxLength(ClassName##Str)>(ClassName##MagicEnum(value)) { } \
-        constexpr ClassName##MagicValue(const size_t value) : EnumHelper::MagicValue<ClassName, EnumHelper::findMaxLength(ClassName##Str)>(ClassName##MagicEnum(value)) { } \
-    };
-#define EnumHelper(...) EnumHelper2(__VA_ARGS__, Invalid)
-
-namespace bitset
+/***************
+ * Enum flag handling
+ **************/
+namespace enumflags
 {
     template <typename EnumClass>
-    class EnumFlags {
+    class EnumFlags
+    {
+    public:
+        typename std::underlying_type<EnumClass>::type flags{};
 
-        public:
-            typename std::underlying_type<EnumClass>::type flags{};
-            EnumFlags() = default;
-
-            EnumFlags(EnumClass flag)
-            {
-                flags = static_cast<typename std::underlying_type<EnumClass>::type>(flag);
-            }
+        EnumFlags(EnumClass flag) : flags(static_cast<typename std::underlying_type<EnumClass>::type>(flag))
+        {
+        }
     };
-
-    template < typename EnumClass >
-    constexpr EnumFlags<EnumClass> operator | (EnumClass l, EnumClass r) noexcept {
+    template <typename EnumClass>
+    constexpr EnumFlags<EnumClass> operator|(EnumClass l, EnumClass r) noexcept
+    {
         return EnumFlags<EnumClass>{l} | EnumFlags<EnumClass>{r};
     }
-    template < typename Enum >
-    constexpr EnumFlags<Enum> operator | (Enum l, EnumFlags<Enum> r) noexcept {
+    template <typename Enum>
+    constexpr EnumFlags<Enum> operator|(Enum l, EnumFlags<Enum> r) noexcept
+    {
         return EnumFlags<Enum>{l} | r;
     }
-    template < typename Enum >
-    constexpr EnumFlags<Enum> operator | (EnumFlags<Enum> l, Enum r) noexcept {
+    template <typename Enum>
+    constexpr EnumFlags<Enum> operator|(EnumFlags<Enum> l, Enum r) noexcept
+    {
         return l | EnumFlags<Enum>{r};
     }
-    template < typename Enum >
-    constexpr EnumFlags<Enum> operator | (EnumFlags<Enum> l, EnumFlags<Enum> r) noexcept {
+    template <typename Enum>
+    constexpr EnumFlags<Enum> operator|(EnumFlags<Enum> l, EnumFlags<Enum> r) noexcept
+    {
         return static_cast<Enum>(l.flags | r.flags);
     }
-    template < typename Enum >
-    constexpr EnumFlags<Enum>& operator |= (EnumFlags<Enum>& l, Enum r) noexcept {
+    template <typename Enum>
+    constexpr EnumFlags<Enum> &operator|=(EnumFlags<Enum> &l, Enum r) noexcept
+    {
         return l = l | EnumFlags<Enum>{r};
     }
-    template < typename Enum >
-        constexpr EnumFlags<Enum>& operator |= (EnumFlags<Enum>& l, EnumFlags<Enum> r) noexcept {
+    template <typename Enum>
+    constexpr EnumFlags<Enum> &operator|=(EnumFlags<Enum> &l, EnumFlags<Enum> r) noexcept
+    {
         return l = l | r;
     }
 
-    template < typename Enum >
-    constexpr EnumFlags<Enum> operator & (Enum l, Enum r) noexcept {
+    template <typename Enum>
+    constexpr EnumFlags<Enum> operator&(Enum l, Enum r) noexcept
+    {
         return EnumFlags<Enum>{l} & EnumFlags<Enum>{r};
     }
-    template < typename Enum >
-    constexpr EnumFlags<Enum> operator & (Enum l, EnumFlags<Enum> r) noexcept {
+    template <typename Enum>
+    constexpr EnumFlags<Enum> operator&(Enum l, EnumFlags<Enum> r) noexcept
+    {
         return EnumFlags<Enum>{l} & r;
     }
-    template < typename Enum >
-    constexpr EnumFlags<Enum> operator & (EnumFlags<Enum> l, Enum r) noexcept {
+    template <typename Enum>
+    constexpr EnumFlags<Enum> operator&(EnumFlags<Enum> l, Enum r) noexcept
+    {
         return l & EnumFlags<Enum>{r};
     }
-    template < typename Enum >
-    constexpr EnumFlags<Enum> operator & (EnumFlags<Enum> l, EnumFlags<Enum> r) noexcept {
+    template <typename Enum>
+    constexpr EnumFlags<Enum> operator&(EnumFlags<Enum> l, EnumFlags<Enum> r) noexcept
+    {
         return static_cast<Enum>(l.flags & r.flags);
     }
-    template < typename Enum >
-    constexpr EnumFlags<Enum>& operator &= (EnumFlags<Enum>& l, Enum r) noexcept {
+    template <typename Enum>
+    constexpr EnumFlags<Enum> &operator&=(EnumFlags<Enum> &l, Enum r) noexcept
+    {
         return l = l & EnumFlags<Enum>{r};
     }
-    template < typename Enum >
-        constexpr EnumFlags<Enum>& operator &= (EnumFlags<Enum>& l, EnumFlags<Enum> r) noexcept {
+    template <typename Enum>
+    constexpr EnumFlags<Enum> &operator&=(EnumFlags<Enum> &l, EnumFlags<Enum> r) noexcept
+    {
         return l = l & r;
     }
 
-
-    template < typename Enum >
-    constexpr EnumFlags<Enum> operator ^ (Enum l, Enum r) noexcept {
+    template <typename Enum>
+    constexpr EnumFlags<Enum> operator^(Enum l, Enum r) noexcept
+    {
         return EnumFlags<Enum>{l} ^ EnumFlags<Enum>{r};
     }
-    template < typename Enum >
-    constexpr EnumFlags<Enum> operator ^ (Enum l, EnumFlags<Enum> r) noexcept {
+    template <typename Enum>
+    constexpr EnumFlags<Enum> operator^(Enum l, EnumFlags<Enum> r) noexcept
+    {
         return EnumFlags<Enum>{l} ^ r;
     }
-    template < typename Enum >
-    constexpr EnumFlags<Enum> operator ^ (EnumFlags<Enum> l, Enum r) noexcept {
+    template <typename Enum>
+    constexpr EnumFlags<Enum> operator^(EnumFlags<Enum> l, Enum r) noexcept
+    {
         return l ^ EnumFlags<Enum>{r};
     }
-    template < typename Enum >
-    constexpr EnumFlags<Enum> operator ^ (EnumFlags<Enum> l, EnumFlags<Enum> r) noexcept {
+    template <typename Enum>
+    constexpr EnumFlags<Enum> operator^(EnumFlags<Enum> l, EnumFlags<Enum> r) noexcept
+    {
         return static_cast<Enum>(l.flags ^ r.flags);
     }
-    template < typename Enum >
-    constexpr EnumFlags<Enum>& operator ^= (EnumFlags<Enum>& l, Enum r) noexcept {
+    template <typename Enum>
+    constexpr EnumFlags<Enum> &operator^=(EnumFlags<Enum> &l, Enum r) noexcept
+    {
         return l = l ^ EnumFlags<Enum>{r};
     }
-    template < typename Enum >
-        constexpr EnumFlags<Enum>& operator ^= (EnumFlags<Enum>& l, EnumFlags<Enum> r) noexcept {
+    template <typename Enum>
+    constexpr EnumFlags<Enum> &operator^=(EnumFlags<Enum> &l, EnumFlags<Enum> r) noexcept
+    {
         return l = l ^ r;
     }
 }
+}
+
+/***************
+ * MacroMagic
+ **************/
+// Use g++ -E a.cpp to only check pre parser
+#define EMPTY()
+#define CAT(a, ...) PRIMITIVE_CAT(a, __VA_ARGS__)
+#define PRIMITIVE_CAT(a, ...) a##__VA_ARGS__
+
+#define COMPL(b) PRIMITIVE_CAT(COMPL_, b)
+#define COMPL_0 1
+#define COMPL_1 0
+
+#define CHECK_N(x, n, ...) n
+#define CHECK(...) CHECK_N(__VA_ARGS__, 0, )
+#define PROBE(x) x, 1,
+
+#define NOT(x) CHECK(PRIMITIVE_CAT(NOT_, x))
+#define NOT_0 PROBE(~)
+#define NOT_ PROBE(~)
+
+#define BOOL(x) COMPL(NOT(x))
+
+#define EVAL(...) EVAL1024(__VA_ARGS__)
+#define EVAL1024(...) EVAL256(EVAL256(EVAL256(EVAL256(__VA_ARGS__))))
+#define EVAL256(...) EVAL64(EVAL64(EVAL64(EVAL64(__VA_ARGS__))))
+#define EVAL64(...) EVAL16(EVAL16(EVAL16(EVAL16(__VA_ARGS__))))
+#define EVAL16(...) EVAL4(EVAL4(EVAL4(EVAL4(__VA_ARGS__))))
+#define EVAL4(...) EVAL1(EVAL1(EVAL1(EVAL1(__VA_ARGS__))))
+#define EVAL2(...) EVAL1(EVAL1(__VA_ARGS__))
+#define EVAL1(...) __VA_ARGS__
+
+#define DEFER2(m) m EMPTY EMPTY()()
+
+#define IF_ELSE(condition) _IF_ELSE(BOOL(condition))
+#define _IF_ELSE(condition) CAT(_IF_, condition)
+
+#define _IF_1(...) __VA_ARGS__ _IF_1_ELSE
+#define _IF_0(...) _IF_0_ELSE
+
+#define _IF_1_ELSE(...)
+#define _IF_0_ELSE(...) __VA_ARGS__
+
+#define FIRST(a, ...) a
+
+#define HAS_ARGS(...) BOOL(FIRST(_END_OF_ARGUMENTS_ __VA_ARGS__)())
+#define _END_OF_ARGUMENTS_() 0
+
+#define MAP(m, first, ...)                                                   \
+    m(first)                                                                 \
+        IF_ELSE(HAS_ARGS(__VA_ARGS__))(                                      \
+            DEFER2(_MAP)()(m, __VA_ARGS__))(/* Do nothing, just terminate */ \
+        )
+#define _MAP() MAP
+
+#define MAP2(m, data1, data2, first, ...)                                                   \
+    m(data1, data2, first)                                                                  \
+        IF_ELSE(HAS_ARGS(__VA_ARGS__))(                                                     \
+            DEFER2(_MAP2)()(m, data1, data2, __VA_ARGS__))(/* Do nothing, just terminate */ \
+        )
+#define _MAP2() MAP2
+
+#define ENUM_HELPER_(EnumType, ...)                                                                                                                                                        \
+    enum class EnumType                                                                                                                                                                    \
+    {                                                                                                                                                                                      \
+        __VA_ARGS__                                                                                                                                                                        \
+    };                                                                                                                                                                                     \
+    static constexpr size_t EnumType##MaxKeyLength = EnumHelper::detail::findMaxLength(#__VA_ARGS__) + 1;                                                                                  \
+    static constexpr const EnumHelper::EnumPair<EnumType, EnumType##MaxKeyLength> EnumType##Map[] = {EVAL(MAP2(ENUM_HELPER_PAIR_CREATOR, EnumType, EnumType##MaxKeyLength, __VA_ARGS__))}; \
+    static constexpr auto EnumType##MagicEnum = EnumHelper::MagicEnum<decltype(EnumType##Map), EnumHelper::EnumPair<EnumType, EnumType##MaxKeyLength>>(EnumType##Map);                     \
+    struct EnumType##MagicValue : public EnumHelper::EnumPair<EnumType, EnumType##MaxKeyLength>                                                                                            \
+    {                                                                                                                                                                                      \
+        constexpr EnumType##MagicValue(const EnumType &value) : EnumHelper::EnumPair<EnumType, EnumType##MaxKeyLength>(EnumType##MagicEnum(value)) {}                                      \
+        constexpr EnumType##MagicValue(const char *name) : EnumHelper::EnumPair<EnumType, EnumType##MaxKeyLength>(EnumType##MagicEnum(name)) {}                                            \
+        constexpr EnumType##MagicValue(const size_t value) : EnumHelper::EnumPair<EnumType, EnumType##MaxKeyLength>(EnumType##MagicEnum(value)) {}                                         \
+    };
+
+#define EnumHelper(...) ENUM_HELPER_(__VA_ARGS__, Invalid)
+
+#define ENUM_HELPER_PAIR_CREATOR(Enum, N, x) \
+    EnumHelper::toEnumPair<Enum, N>((const char *)#x, EnumHelper::detail::findKeyLength(#x), ((EnumHelper::detail::ignoreAssignment<Enum>)Enum::x).value),
